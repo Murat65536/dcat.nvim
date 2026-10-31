@@ -30,21 +30,23 @@ local function cell_pixels()
   end
 end
 
-local help = {}
+-- The first dcat with --cell-size, --kitty-shared-memory, --kitty-image-id
+-- and --detect-output
+local MIN_VERSION = "1.4.0"
+local versions = {}
 
--- Whether this dcat has a flag, which older versions may not
----@param flag string
----@return boolean
-local function has_flag(flag)
+---@return vim.Version?
+local function dcat_version()
   local cmd = config.cmd()
   local key = table.concat(cmd, "\0")
-  if help[key] == nil then
+  if versions[key] == nil then
     local ok, result = pcall(function()
-      return vim.system(vim.list_extend(cmd, { "--help" }), { text = true }):wait(5000)
+      return vim.system(vim.list_extend(cmd, { "--version" }), { text = true }):wait(5000)
     end)
-    help[key] = ok and result.code == 0 and result.stdout or ""
+    local text = ok and result.code == 0 and result.stdout:match("%d+%.%d+%.%d+")
+    versions[key] = text and vim.version.parse(text) or false
   end
-  return help[key]:find(flag, 1, true) ~= nil
+  return versions[key] or nil
 end
 
 ---@return string?
@@ -68,8 +70,9 @@ function M.unavailable()
   if not cell_pixels() then
     return "the terminal doesn't report its size in pixels"
   end
-  if not has_flag("--detect-output") then
-    return "this dcat is too old for pixels in Neovim"
+  local version = dcat_version()
+  if not version or vim.version.lt(version, MIN_VERSION) then
+    return ("pixels in Neovim need dcat %s or newer"):format(MIN_VERSION)
   end
 end
 
