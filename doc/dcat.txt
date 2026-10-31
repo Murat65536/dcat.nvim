@@ -7,7 +7,7 @@ CONTENTS                                                       *dcat.nvim*
   2. Configuration ..................................... |dcat-config|
   3. Lua API ........................................... |dcat-api|
 
-Requires Neovim 0.10+ and dcat (https://github.com/Murat65536/dcat).
+Requires Neovim 0.12+ and dcat (https://github.com/Murat65536/dcat).
 Run |:checkhealth| dcat to check the setup.
 
 ==============================================================================
@@ -18,13 +18,26 @@ Run |:checkhealth| dcat to check the setup.
                         [flags] are passed to dcat, e.g. >vim
                             :Dcat model.glb --spin 1 --status-bar
 <
-In the viewer, keys go to dcat. Run `dcat --controls` for the list. `q`
-closes the viewer. These keys go to Neovim instead:
+`q` closes the viewer. Leaving a floating viewer also closes it.
+
+                                                             *dcat-pixels*
+The model is drawn in pixels when the terminal supports the Kitty graphics
+protocol or Sixel, and with text characters otherwise. |:checkhealth| dcat
+shows which, and why. See |dcat-output| to choose.
+
+With pixels, dcat runs outside |:terminal| and its frames are written to the
+terminal with |nvim_ui_send()|, over the viewer's window. The window stays in
+normal mode: w a s d e r m p 1 2 go to dcat and every other key works as
+usual. Floating windows over the viewer get drawn over, and resizing the
+window restarts dcat. Inside tmux or screen, pixels aren't used.
+
+                                                         *dcat-characters*
+With characters, dcat runs in a |:terminal| and gets every key. Run
+`dcat --controls` for the list. These keys go to Neovim instead:
   • <C-w> and :
   • normal-mode mappings that are a single Ctrl or Alt key, like a <C-n>
     that toggles a file tree. Terminal-mode mappings you made take priority.
-Entering the viewer's window again gives dcat the keys. Leaving a floating
-viewer closes it.
+Entering the viewer's window again gives dcat the keys.
 
 Editing a file with one of the |dcat-extensions| opens the viewer over an
 empty placeholder buffer. In the placeholder:
@@ -55,10 +68,11 @@ args            Arguments passed on every launch, before those given to
                 |:Dcat|.
 
                                                              *dcat-output*
-output          "truecolor", "palette" or "block". nil picks "truecolor" when
-                'termguicolors' is set and "palette" otherwise. Neovim's
-                terminal can't show Kitty or Sixel images, so a character
-                mode is always passed unless the arguments choose one.
+output          "kitty" or "sixel" for pixels, or "truecolor", "palette" or
+                "block" for characters. nil picks pixels when the terminal
+                supports them, and otherwise "truecolor" when 'termguicolors'
+                is set and "palette" when it isn't. An output flag passed to
+                |:Dcat|, like `-T`, overrides this.
 
                                                              *dcat-layout*
 layout          Where the viewer opens:

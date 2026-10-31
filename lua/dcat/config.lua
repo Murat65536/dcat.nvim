@@ -1,7 +1,7 @@
 local M = {}
 
 ---@alias dcat.Layout "fullscreen"|"float"|"current"|"split"|"vsplit"|"tab"
----@alias dcat.Output "truecolor"|"palette"|"block"
+---@alias dcat.Output "kitty"|"sixel"|"truecolor"|"palette"|"block"
 
 ---@class dcat.FloatConfig
 ---@field width number Columns, or a fraction of the editor width when <= 1
@@ -11,7 +11,7 @@ local M = {}
 ---@class dcat.Config
 ---@field cmd string|string[] The dcat executable, optionally with leading arguments
 ---@field args string[] Extra arguments passed on every launch
----@field output? dcat.Output Character mode; nil picks truecolor when 'termguicolors' is set
+---@field output? dcat.Output nil picks pixels when the terminal supports them, and characters otherwise
 ---@field layout dcat.Layout Where the viewer opens
 ---@field float dcat.FloatConfig Options for the "float" layout
 ---@field extensions string[] File extensions that open in dcat on :edit

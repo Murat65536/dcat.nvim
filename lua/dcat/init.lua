@@ -2,25 +2,26 @@ local config = require("dcat.config")
 
 local M = {}
 
-local OUTPUT_FLAGS = {
+-- Flags that pick an output mode. dcat rejects more than one.
+---@type table<string, dcat.Output>
+local OUTPUT_ARGS = {
+  ["-S"] = "sixel",
+  ["--sixel"] = "sixel",
+  ["-K"] = "kitty",
+  ["--kitty"] = "kitty",
+  ["--kitty-direct"] = "kitty",
+  ["-T"] = "truecolor",
+  ["--truecolor-characters"] = "truecolor",
+  ["-P"] = "palette",
+  ["--palette-characters"] = "palette",
+  ["-B"] = "block",
+  ["--block-characters"] = "block",
+}
+
+local CHARACTER_FLAGS = {
   truecolor = "--truecolor-characters",
   palette = "--palette-characters",
   block = "--block-characters",
-}
-
--- Flags that pick an output mode. dcat rejects more than one.
-local OUTPUT_ARGS = {
-  ["-S"] = true,
-  ["--sixel"] = true,
-  ["-K"] = true,
-  ["--kitty"] = true,
-  ["--kitty-direct"] = true,
-  ["-T"] = true,
-  ["--truecolor-characters"] = true,
-  ["-P"] = true,
-  ["--palette-characters"] = true,
-  ["-B"] = true,
-  ["--block-characters"] = true,
 }
 
 -- Flags whose value is the next argument, so it isn't taken for the model path
@@ -49,155 +50,42 @@ function M.setup(opts)
   M.register_extensions()
 end
 
+-- The output mode asked for by the arguments or the config, if any
 ---@param args string[]
----@return string[]
-local function output_args(args)
+---@return dcat.Output?
+local function requested_output(args)
+  local requested = config.options.output
   for _, arg in ipairs(args) do
-    if OUTPUT_ARGS[arg] then
-      return {}
+    requested = OUTPUT_ARGS[arg] or requested
+  end
+  return requested
+end
+
+-- The output mode to use, and why pixels aren't used if they aren't
+---@param args string[] dcat arguments, which may pick a mode themselves
+---@return dcat.Output output, string? reason
+function M.output(args)
+  local requested = requested_output(args)
+  if requested and not CHARACTER_FLAGS[requested] and requested ~= "kitty" and requested ~= "sixel" then
+    error(("dcat: unknown output %q"):format(requested))
+  end
+
+  local pixels = require("dcat.pixels")
+  local reason = pixels.unavailable()
+  if requested == "kitty" or requested == "sixel" then
+    if not reason then
+      return requested
     end
-  end
-  -- Neovim's terminal can't show Kitty or Sixel images, but dcat would pick
-  -- them from the environment variables it inherits from the outer terminal
-  local output = config.options.output or (vim.o.termguicolors and "truecolor" or "palette")
-  local flag = OUTPUT_FLAGS[output]
-  if not flag then
-    error(("dcat: unknown output %q, expected truecolor, palette or block"):format(output))
-  end
-  return { flag }
-end
-
----@param size number
----@param total integer
-local function dimension(size, total)
-  local cells = size <= 1 and math.floor(total * size) or size
-  return math.max(1, math.min(cells, total))
-end
-
----@param layout dcat.Layout
----@param title string
-local function float_config(layout, title)
-  if layout == "fullscreen" then
-    return {
-      relative = "editor",
-      row = 0,
-      col = 0,
-      width = vim.o.columns,
-      height = vim.o.lines - vim.o.cmdheight,
-      border = "none",
-      style = "minimal",
-      -- Above other floats, which would otherwise show through
-      zindex = 200,
-    }
-  end
-  local float = config.options.float
-  local columns = vim.o.columns
-  local lines = vim.o.lines - vim.o.cmdheight
-  local width = dimension(float.width, columns - 2)
-  local height = dimension(float.height, lines - 2)
-  return {
-    relative = "editor",
-    width = width,
-    height = height,
-    col = math.floor((columns - width - 2) / 2),
-    row = math.floor((lines - height - 2) / 2),
-    border = float.border,
-    title = title,
-    title_pos = "center",
-    style = "minimal",
-  }
-end
-
----@param buf integer
----@param layout dcat.Layout
----@param title string
----@return integer win, integer? previous_buf
-local function open_window(buf, layout, title)
-  if layout == "float" or layout == "fullscreen" then
-    return vim.api.nvim_open_win(buf, true, float_config(layout, title))
-  elseif layout == "current" then
-    local previous = vim.api.nvim_get_current_buf()
-    vim.api.nvim_win_set_buf(0, buf)
-    return vim.api.nvim_get_current_win(), previous
-  elseif layout == "split" or layout == "vsplit" then
-    vim.cmd(layout == "split" and "split" or "vsplit")
-  elseif layout == "tab" then
-    vim.cmd("tab split")
-  else
-    error(("dcat: unknown layout %q"):format(layout))
-  end
-  vim.api.nvim_win_set_buf(0, buf)
-  return vim.api.nvim_get_current_win()
-end
-
--- The terminal's text, with lines it wrapped at the window edge joined back up
----@param buf integer
----@param width integer
-local function terminal_text(buf, width)
-  local text = ""
-  local wrapped = false
-  for _, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
-    if line:match("%S") then
-      text = text .. ((wrapped or text == "") and "" or "\n") .. line
-      wrapped = vim.fn.strdisplaywidth(line) >= width
-    else
-      wrapped = false
+  elseif requested then
+    return requested
+  elseif not reason then
+    local protocol = pixels.protocol()
+    if protocol then
+      return protocol
     end
+    reason = "the terminal isn't one known to support Kitty graphics or Sixel"
   end
-  return vim.trim(text:gsub("%[Process exited %d+%]", ""))
-end
-
--- Floats can't cover the command line, so it's hidden while a fullscreen
--- viewer is open. Counted, since a new viewer opens before the old one closes.
-local fullscreen_viewers = 0
-local saved_cmdheight
-
-local function hide_cmdline()
-  if fullscreen_viewers == 0 then
-    saved_cmdheight = vim.o.cmdheight
-    vim.o.cmdheight = 0
-  end
-  fullscreen_viewers = fullscreen_viewers + 1
-end
-
-local function restore_cmdline()
-  fullscreen_viewers = fullscreen_viewers - 1
-  if fullscreen_viewers == 0 and saved_cmdheight then
-    vim.o.cmdheight = saved_cmdheight
-  end
-end
-
--- <C-c> quits dcat, <C-w> is mapped separately, and <C-\\> leaves terminal mode
-local NOT_FORWARDED = { ["<C-C>"] = true, ["<C-W>"] = true, ["<C-\\>"] = true, ["<C-Bslash>"] = true }
-
--- The viewer sends every key to dcat. These go to Neovim instead: <C-w>, : and
--- every single-key Ctrl or Alt normal-mode mapping, none of which dcat uses.
----@param buf integer
-local function forward_keys(buf)
-  local function map(key, rhs)
-    -- Terminal-mode mappings the user made win
-    if vim.fn.maparg(key, "t") == "" then
-      vim.keymap.set("t", key, rhs, { buffer = buf })
-    end
-  end
-
-  -- Built in, so they run in normal mode without remapping
-  map("<C-W>", "<C-\\><C-n><C-W>")
-  map(":", "<C-\\><C-n>:")
-
-  for _, mapping in ipairs(vim.api.nvim_get_keymap("n")) do
-    local key = mapping.lhs or ""
-    if key:match("^<[CMA]%-[^>]+>$") and not NOT_FORWARDED[key] then
-      map(key, function()
-        -- A remapped key fed while still in terminal mode would hit this
-        -- mapping again, so it's fed once Neovim is in normal mode
-        vim.cmd.stopinsert()
-        vim.schedule(function()
-          vim.api.nvim_feedkeys(vim.keycode(key), "m", false)
-        end)
-      end)
-    end
-  end
+  return vim.o.termguicolors and "truecolor" or "palette", reason
 end
 
 ---@class dcat.OpenOpts
@@ -214,124 +102,37 @@ function M.open(path, opts)
     vim.notify("dcat: can't read " .. path, vim.log.levels.ERROR)
     return
   end
-
   local cmd = config.cmd()
   if vim.fn.executable(cmd[1]) == 0 then
     vim.notify(("dcat: %s is not executable, see :checkhealth dcat"):format(cmd[1]), vim.log.levels.ERROR)
     return
   end
-  local extra = vim.list_extend(vim.deepcopy(config.options.args), opts.args or {})
-  vim.list_extend(cmd, output_args(extra))
-  vim.list_extend(cmd, extra)
-  -- "--" keeps a file named like a flag from being parsed as one
-  vim.list_extend(cmd, { "--", path })
 
-  local layout = opts.layout or config.options.layout
-  local buf = vim.api.nvim_create_buf(false, true)
-  local title = " " .. vim.fn.fnamemodify(path, ":t") .. " "
-  local floating = layout == "float" or layout == "fullscreen"
-  if layout == "fullscreen" then
-    hide_cmdline()
+  local args = vim.list_extend(vim.deepcopy(config.options.args), opts.args or {})
+  local output, reason = M.output(args)
+  local requested = requested_output(args)
+  if reason and (requested == "kitty" or requested == "sixel") then
+    vim.notify(("dcat: showing characters, since %s"):format(reason), vim.log.levels.WARN)
   end
-  local ok_win, win, previous = pcall(open_window, buf, layout, title)
-  if not ok_win then
-    if layout == "fullscreen" then
-      restore_cmdline()
-    end
-    vim.api.nvim_buf_delete(buf, { force = true })
-    error(win, 0)
-  end
-
-  -- The terminal takes the window's text area, so free up the gutter first.
-  -- Set locally, so the window gets its options back when it shows another buffer.
-  local wo = vim.wo[win][0]
-  wo.number = false
-  wo.relativenumber = false
-  wo.signcolumn = "no"
-  wo.foldcolumn = "0"
-  wo.spell = false
-
-  local closed = false
-  local function close()
-    if closed then
-      return
-    end
-    closed = true
-    if layout == "fullscreen" then
-      restore_cmdline()
-    end
-    if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf then
-      if previous and vim.api.nvim_buf_is_valid(previous) then
-        vim.api.nvim_win_set_buf(win, previous)
-      elseif #vim.api.nvim_tabpage_list_wins(0) > 1 or #vim.api.nvim_list_tabpages() > 1 then
-        vim.api.nvim_win_close(win, true)
-      end
-    end
-    if vim.api.nvim_buf_is_valid(buf) then
-      vim.api.nvim_buf_delete(buf, { force = true })
+  -- The viewer adds the output flag for the mode it runs
+  for _, arg in ipairs(args) do
+    if not OUTPUT_ARGS[arg] then
+      cmd[#cmd + 1] = arg
     end
   end
 
-  local job_opts = {
-    on_exit = function(_, code)
-      vim.schedule(function()
-        local message
-        if code ~= 0 and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
-          message = terminal_text(buf, vim.api.nvim_win_get_width(win))
-          message = message ~= "" and message or ("dcat exited with code " .. code)
-        end
-        -- Close first, so the message shows with the command line back
-        close()
-        if message then
-          vim.notify(message, vim.log.levels.ERROR)
-        end
-      end)
-    end,
-  }
-
-  local ok, job
-  if vim.fn.has("nvim-0.11") == 1 then
-    job_opts.term = true
-    ok, job = pcall(vim.fn.jobstart, cmd, job_opts)
+  local viewer =
+    require("dcat.window").open(opts.layout or config.options.layout, " " .. vim.fn.fnamemodify(path, ":t") .. " ")
+  vim.b[viewer.buf].dcat_path = path
+  if output == "kitty" or output == "sixel" then
+    ---@cast output "kitty"|"sixel"
+    require("dcat.pixels").start(viewer, output, cmd, path)
   else
-    ---@diagnostic disable-next-line: deprecated
-    ok, job = pcall(vim.fn.termopen, cmd, job_opts)
+    -- Neovim's terminal can't show Kitty or Sixel images, but dcat would pick
+    -- them from the environment variables it inherits from the outer terminal
+    vim.list_extend(cmd, { CHARACTER_FLAGS[output], "--", path })
+    require("dcat.terminal").start(viewer, cmd)
   end
-  if not ok or job <= 0 then
-    close()
-    vim.notify("dcat: failed to start " .. cmd[1] .. (ok and "" or (": " .. job)), vim.log.levels.ERROR)
-    return
-  end
-
-  vim.bo[buf].bufhidden = "wipe"
-  vim.b[buf].dcat_path = path
-  forward_keys(buf)
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group = group,
-    buffer = buf,
-    command = "startinsert",
-  })
-  if floating then
-    vim.api.nvim_create_autocmd("VimResized", {
-      group = group,
-      buffer = buf,
-      callback = function()
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_win_set_config(win, float_config(layout, title))
-        end
-      end,
-    })
-    -- A float left behind would keep covering the editor
-    vim.api.nvim_create_autocmd("WinLeave", {
-      group = group,
-      buffer = buf,
-      once = true,
-      callback = function()
-        vim.schedule(close)
-      end,
-    })
-  end
-  vim.cmd.startinsert()
 end
 
 -- Load the file into its buffer the way :edit would without the BufReadCmd
