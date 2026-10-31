@@ -1,0 +1,93 @@
+*dcat.txt*  View 3D models with dcat
+
+==============================================================================
+CONTENTS                                                       *dcat.nvim*
+
+  1. Usage ............................................. |dcat-usage|
+  2. Configuration ..................................... |dcat-config|
+  3. Lua API ........................................... |dcat-api|
+
+Requires Neovim 0.10+ and dcat (https://github.com/Murat65536/dcat).
+Run |:checkhealth| dcat to check the setup.
+
+==============================================================================
+1. USAGE                                                       *dcat-usage*
+
+                                                                     *:Dcat*
+:Dcat [file] [flags]    View [file] in dcat, or the current buffer's file.
+                        [flags] are passed to dcat, e.g. >vim
+                            :Dcat model.glb --spin 1 --status-bar
+<
+In the viewer, keys go to dcat. Run `dcat --controls` for the list. `q`
+closes the viewer. These keys go to Neovim instead:
+  • <C-w> and :
+  • normal-mode mappings that are a single Ctrl or Alt key, like a <C-n>
+    that toggles a file tree. Terminal-mode mappings you made take priority.
+Entering the viewer's window again gives dcat the keys. Leaving a floating
+viewer closes it.
+
+Editing a file with one of the |dcat-extensions| opens the viewer over an
+empty placeholder buffer. In the placeholder:
+  <CR>  open the viewer again
+  e     edit the file as text. The buffer then stays text when reloaded.
+The placeholder has 'buftype' "nofile", so |:w| can't write over the model,
+and 'filetype' "dcat". New files open as normal text.
+
+==============================================================================
+2. CONFIGURATION                                              *dcat-config*
+
+Calling setup() is optional. The defaults: >lua
+    require("dcat").setup({
+      cmd = "dcat",
+      args = {},
+      output = nil,
+      layout = "current",
+      float = { width = 0.9, height = 0.9, border = "rounded" },
+      extensions = { --[[ every format dcat reads ]] },
+    })
+<
+                                                                *dcat-cmd*
+cmd             The dcat executable, as a string or a list with leading
+                arguments.
+
+                                                               *dcat-args*
+args            Arguments passed on every launch, before those given to
+                |:Dcat|.
+
+                                                             *dcat-output*
+output          "truecolor", "palette" or "block". nil picks "truecolor" when
+                'termguicolors' is set and "palette" otherwise. Neovim's
+                terminal can't show Kitty or Sixel images, so a character
+                mode is always passed unless the arguments choose one.
+
+                                                             *dcat-layout*
+layout          Where the viewer opens:
+                  "current"     the current window, restored on exit
+                  "fullscreen"  a float over the whole editor. 'cmdheight'
+                                is set to 0 while it's open.
+                  "float"       a floating window, see |dcat-float|
+                  "split", "vsplit", "tab"
+
+                                                              *dcat-float*
+float           Options for the "float" layout. `width` and `height` are cells, or
+                fractions of the editor size when <= 1. `border` is passed
+                to |nvim_open_win()|.
+
+                                                         *dcat-extensions*
+extensions      File extensions that open in dcat on |:edit|, matched
+                ignoring case. The default is every format dcat reads except
+                extensions that ordinary files share (ac, x, xml, raw, mot,
+                prj, uc, mdl, scn, pk3) and animation or camera-only formats
+                (bvh, csm, md5anim, md5camera, vta). The full list is in
+                `require("dcat.config").defaults.extensions`. Set to {} to
+                turn this off.
+
+==============================================================================
+3. LUA API                                                       *dcat-api*
+
+require("dcat").open({path}, {opts})                          *dcat.open()*
+    View {path} in dcat. {opts} is optional:
+      • args: list of extra dcat arguments
+      • layout: overrides |dcat-layout|
+
+ vim:tw=78:ts=8:ft=help:norl:
