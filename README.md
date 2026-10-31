@@ -1,12 +1,11 @@
 # dcat.nvim
 
-View 3D models in Neovim with [dcat](https://github.com/Murat65536/dcat).
-Opening a model file shows it in dcat instead of as text.
+Neovim 3d model viewer with [dcat](https://github.com/Murat65536/dcat).
 
 ## Requirements
 
 - Neovim 0.12+
-- [dcat](https://github.com/Murat65536/dcat#install) on your `PATH`
+- [dcat](https://github.com/Murat65536/dcat#install) 1.4.0+
 
 ## Install
 
