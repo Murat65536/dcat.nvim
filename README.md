@@ -2,10 +2,6 @@
 
 View 3D models in Neovim with [dcat](https://github.com/Murat65536/dcat).
 
-- Opening any 3D model (`:e`, a picker, a file explorer) shows it in dcat instead of as text
-- `:Dcat model.glb` opens a model directly
-- dcat errors, like an unreadable model, show up as notifications
-
 ## Requirements
 
 - Neovim 0.10+
@@ -21,10 +17,6 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
   opts = {},
 }
 ```
-
-The plugin works without calling `setup()`, using the defaults below.
-
-Run `:checkhealth dcat` to check that dcat is found.
 
 ## Usage
 
@@ -75,16 +67,6 @@ require("dcat").setup({
   -- See lua/dcat/config.lua for the full list.
   extensions = { ... },
 })
-```
-
-A few formats dcat reads aren't in the default list because ordinary files share their extensions: `ac` (`configure.ac`), `x`, `xml`, `raw`, `mot`, `prj`, `uc`, `mdl`, `scn` and `pk3`.
-Formats that hold only animation or camera data (`bvh`, `csm`, `md5anim`, `md5camera`, `vta`) are left out too.
-To add some back:
-
-```lua
-local extensions = vim.deepcopy(require("dcat.config").defaults.extensions)
-vim.list_extend(extensions, { "x", "mdl" })
-require("dcat").setup({ extensions = extensions })
 ```
 
 ### Output modes
