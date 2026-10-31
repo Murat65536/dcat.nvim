@@ -27,7 +27,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 :Dcat model.glb --spin 1  " pass any dcat flags
 ```
 
-`q` closes the viewer. After closing a model you opened with `:e`, press `e` to edit it as text.
+`<C-c>` closes the viewer. After closing a model you opened with `:e`, press `e` to edit it as text.
 
 Models are drawn in pixels in terminals that support the Kitty graphics protocol or Sixel, and with text characters elsewhere.
 `:checkhealth dcat` shows which you get.

@@ -2,6 +2,9 @@ local config = require("dcat.config")
 
 local M = {}
 
+-- Set while a closing viewer puts back the buffer it covered
+M.restoring = false
+
 local group = vim.api.nvim_create_augroup("dcat_window", { clear = true })
 
 ---@param size number
@@ -138,7 +141,9 @@ function M.open(layout, title)
     end
     if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf then
       if previous and vim.api.nvim_buf_is_valid(previous) then
-        vim.api.nvim_win_set_buf(win, previous)
+        M.restoring = true
+        pcall(vim.api.nvim_win_set_buf, win, previous)
+        M.restoring = false
       elseif #vim.api.nvim_tabpage_list_wins(0) > 1 or #vim.api.nvim_list_tabpages() > 1 then
         vim.api.nvim_win_close(win, true)
       end

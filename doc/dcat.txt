@@ -18,29 +18,25 @@ Run |:checkhealth| dcat to check the setup.
                         [flags] are passed to dcat, e.g. >vim
                             :Dcat model.glb --spin 1 --status-bar
 <
-`q` closes the viewer. Leaving a floating viewer also closes it.
+dcat runs in a |:terminal| and gets every key except q and Q, which do
+nothing. Run `dcat --controls` for the list. These keys go to Neovim instead:
+  • <C-w> and :
+  • normal-mode mappings that are a single Ctrl or Alt key, like a <C-n>
+    that toggles a file tree. Terminal-mode mappings you made take priority.
+Entering the viewer's window again gives dcat the keys. <C-c> closes the
+viewer, and so does leaving a floating one.
 
                                                              *dcat-pixels*
 The model is drawn in pixels when the terminal supports the Kitty graphics
 protocol or Sixel, and with text characters otherwise. |:checkhealth| dcat
-shows which, and why. See |dcat-output| to choose.
+shows which, and why. See |dcat-output| to choose. With pixels, dcat's
+images are taken from |TermRequest| and drawn over the window with
+|nvim_ui_send()|. Floating windows over the viewer get drawn over. Inside
+tmux or screen, or with a dcat too old to have --cell-size, pixels aren't
+used.
 
-With pixels, dcat runs outside |:terminal| and its frames are written to the
-terminal with |nvim_ui_send()|, over the viewer's window. The window stays in
-normal mode: w a s d e r m p 1 2 go to dcat and every other key works as
-usual. Floating windows over the viewer get drawn over. Inside tmux or
-screen, or with a dcat too old to have --cell-size, pixels aren't used.
-
-                                                         *dcat-characters*
-With characters, dcat runs in a |:terminal| and gets every key. Run
-`dcat --controls` for the list. These keys go to Neovim instead:
-  • <C-w> and :
-  • normal-mode mappings that are a single Ctrl or Alt key, like a <C-n>
-    that toggles a file tree. Terminal-mode mappings you made take priority.
-Entering the viewer's window again gives dcat the keys.
-
-Editing a file with one of the |dcat-extensions| opens the viewer over an
-empty placeholder buffer. In the placeholder:
+Editing a file with one of the |dcat-extensions|, or showing its buffer
+again, opens the viewer over an empty placeholder buffer. In the placeholder:
   <CR>  open the viewer again
   e     edit the file as text. The buffer then stays text when reloaded.
 The placeholder has 'buftype' "nofile", so |:w| can't write over the model,

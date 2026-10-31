@@ -4,7 +4,7 @@ local M = {}
 
 local group = vim.api.nvim_create_augroup("dcat_terminal", { clear = true })
 
-local NOT_FORWARDED = { ["<C-C>"] = true, ["<C-W>"] = true, ["<C-\\>"] = true, ["<C-Bslash>"] = true }
+local SKIP_FORWARDING = { ["<C-C>"] = true, ["<C-W>"] = true, ["<C-\\>"] = true, ["<C-Bslash>"] = true }
 
 -- Keys that go to Neovim instead of dcat
 ---@param buf integer
@@ -17,10 +17,13 @@ local function forward_keys(buf)
 
   map("<C-W>", "<C-\\><C-n><C-W>")
   map(":", "<C-\\><C-n>:")
+  -- dcat quits on either
+  map("q", "<Nop>")
+  map("Q", "<Nop>")
 
   for _, mapping in ipairs(vim.api.nvim_get_keymap("n")) do
     local key = mapping.lhs or ""
-    if key:match("^<[CMA]%-[^>]+>$") and not NOT_FORWARDED[key] then
+    if key:match("^<[CMA]%-[^>]+>$") and not SKIP_FORWARDING[key] then
       map(key, function()
         -- Fed in terminal mode, the key would trigger this mapping again
         vim.cmd.stopinsert()
@@ -52,6 +55,7 @@ end
 --- Run dcat in the viewer's window
 ---@param viewer dcat.Viewer
 ---@param cmd string[] The whole dcat command line
+---@return integer? job
 function M.start(viewer, cmd)
   local buf, win = viewer.buf, viewer.win
   local ok, job = pcall(vim.fn.jobstart, cmd, {
@@ -83,7 +87,24 @@ function M.start(viewer, cmd)
     buffer = buf,
     command = "startinsert",
   })
+  -- Quit with q, so dcat removes its shared memory. Killed, it can't.
+  local function quit()
+    if pcall(vim.api.nvim_chan_send, job, "q") then
+      vim.fn.jobwait({ job }, 1000)
+    end
+  end
+  local on_exit = vim.api.nvim_create_autocmd("VimLeavePre", { group = group, once = true, callback = quit })
+  vim.api.nvim_create_autocmd("BufUnload", {
+    group = group,
+    buffer = buf,
+    once = true,
+    callback = function()
+      pcall(vim.api.nvim_del_autocmd, on_exit)
+      quit()
+    end,
+  })
   vim.cmd.startinsert()
+  return job
 end
 
 return M

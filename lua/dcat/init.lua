@@ -122,7 +122,9 @@ function M.open(path, opts)
   vim.b[viewer.buf].dcat_path = path
   if output == "kitty" or output == "sixel" then
     ---@cast output "kitty"|"sixel"
-    require("dcat.pixels").start(viewer, output, cmd, path)
+    require("dcat.pixels").start(viewer, output, cmd, path, function()
+      M.open(path, opts)
+    end)
   else
     -- dcat would pick graphics from the inherited environment
     vim.list_extend(cmd, { CHARACTER_FLAGS[output], "--", path })
@@ -137,6 +139,7 @@ local function load_as_text(buf)
   local escaped = vim.fn.fnameescape(path)
   local bo = vim.bo[buf]
   vim.b[buf].dcat_text = true
+  pcall(vim.api.nvim_del_augroup_by_name, "dcat_model_" .. buf)
   pcall(vim.keymap.del, "n", "<CR>", { buffer = buf })
   pcall(vim.keymap.del, "n", "e", { buffer = buf })
   bo.buftype = ""
@@ -185,17 +188,32 @@ local function load_model_buffer(buf)
     load_as_text(buf)
   end, { buffer = buf, desc = "Edit model as text" })
 
+  -- Opening a viewer changes the current buffer, so this opens one only once
   local function open_if_shown()
     if vim.api.nvim_get_current_buf() == buf and not vim.b[buf].dcat_text then
       M.open(path)
     end
   end
-  -- Wait for the real window size
-  if vim.v.vim_did_enter == 1 then
-    vim.schedule(open_if_shown)
-  else
-    vim.api.nvim_create_autocmd("VimEnter", { group = group, once = true, callback = open_if_shown })
+  local function open_soon()
+    -- Wait for the real window size
+    if vim.v.vim_did_enter == 1 then
+      vim.schedule(open_if_shown)
+    else
+      vim.api.nvim_create_autocmd("VimEnter", { group = group, once = true, callback = open_if_shown })
+    end
   end
+  -- Showing the buffer again doesn't read it again
+  vim.api.nvim_create_autocmd("BufWinEnter", {
+    group = vim.api.nvim_create_augroup("dcat_model_" .. buf, { clear = true }),
+    buffer = buf,
+    callback = function()
+      -- Not when a closing viewer puts it back
+      if not require("dcat.window").restoring then
+        open_soon()
+      end
+    end,
+  })
+  open_soon()
 end
 
 -- Autocmd patterns are case sensitive
