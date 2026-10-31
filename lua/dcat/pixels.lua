@@ -1,11 +1,7 @@
--- The pixel viewer: dcat's Kitty or Sixel output in a Neovim window.
---
--- Neovim's :terminal drops image escape sequences, so dcat runs in a plain pty
--- job instead. Its output arrives here raw, and each frame's image sequences
--- are written straight to the host terminal with nvim_ui_send(), after moving
--- the host cursor to the window. Everything else dcat writes (alternate
--- screen, clearing, cursor moves) is dropped, since it assumes it owns the
--- whole screen.
+-- Pixel viewer. :terminal drops images, so dcat runs in a pty and its frames
+-- are drawn over the window with nvim_ui_send().
+
+local config = require("dcat.config")
 
 local M = {}
 
@@ -20,21 +16,13 @@ pcall(
 )
 
 local TIOCGWINSZ = jit.os == "OSX" and 0x40087468 or 0x5413
--- dcat marks the start and end of every frame with synchronized updates
 local FRAME_END = "\27[?2026l"
--- Big enough that dcat never crops a frame to it. dcat assumes 10x20 pixel
--- cells when the pty reports no pixel size.
-local PTY_COLUMNS, PTY_ROWS = 1000, 500
--- dcat always uses image 1, which other image plugins may use too
+-- Replaces dcat's image id 1, which other plugins may use
 local KITTY_IMAGE_ID = 2147483000
--- dcat's request for device attributes, which ends its support queries
 local DA1_QUERY = "\27[c"
--- Keys forwarded to dcat. Everything else keeps its normal-mode meaning.
 local KEYS = { "w", "a", "s", "d", "e", "r", "m", "p", "1", "2" }
 
--- Ask dcat to quit with q, so it removes its shared memory objects, and only
--- kill it if it doesn't. Stopping the job outright closes its pty, and the
--- signals that follow can end dcat before it cleans up.
+-- Quit with q, so dcat removes its shared memory
 ---@param job integer
 local function stop(job)
   if not pcall(vim.api.nvim_chan_send, job, "q") then
@@ -47,11 +35,10 @@ local function stop(job)
   end, 3000)
 end
 
--- The host terminal's cell size in pixels. The server's stdio is the TUI's
--- terminal, so it answers the same ioctl the terminal's size comes from.
+-- Neovim's stdio is the host terminal
 ---@return integer?, integer?
 local function cell_pixels()
-  ---@type any FFI struct, opaque to the type checker
+  ---@type any
   local size = ffi.new("struct dcat_winsize")
   for _, fd in ipairs({ 1, 0, 2 }) do
     if ffi.C.ioctl(fd, TIOCGWINSZ, size) == 0 and size.ws_xpixel > 0 and size.ws_col > 0 and size.ws_row > 0 then
@@ -60,7 +47,6 @@ local function cell_pixels()
   end
 end
 
--- Why pixels can't be shown here, or nil if they can
 ---@return string?
 function M.unavailable()
   if
@@ -82,9 +68,27 @@ function M.unavailable()
   if not cell_pixels() then
     return "the terminal doesn't report its size in pixels"
   end
+  if not M.supported() then
+    return "this dcat has no --cell-size, which pixels in Neovim need"
+  end
 end
 
--- The graphics protocol the terminal supports, judged the way dcat does
+local supported = {}
+
+---@return boolean
+function M.supported()
+  local cmd = config.cmd()
+  local key = table.concat(cmd, "\0")
+  if supported[key] == nil then
+    local ok, result = pcall(function()
+      return vim.system(vim.list_extend(cmd, { "--help" }), { text = true }):wait(5000)
+    end)
+    supported[key] = ok and result.code == 0 and result.stdout:find("--cell-size", 1, true) ~= nil
+  end
+  return supported[key]
+end
+
+-- Same detection as dcat
 ---@return "kitty"|"sixel"|nil
 function M.protocol()
   local term = vim.env.TERM or ""
@@ -108,8 +112,7 @@ function M.protocol()
   end
 end
 
--- Whether a float's border has a top and a left side, which the window's
--- screen position includes
+-- getwininfo() positions include a float's border
 ---@param win integer
 ---@return integer top, integer left
 local function border_offsets(win)
@@ -117,7 +120,6 @@ local function border_offsets(win)
   if type(border) ~= "table" or #border == 0 then
     return 0, 0
   end
-  -- Sides are listed clockwise from the top left corner. An empty one is left out.
   local function present(index)
     local side = border[(index - 1) % #border + 1]
     side = type(side) == "table" and side[1] or side
@@ -126,7 +128,6 @@ local function border_offsets(win)
   return present(2), present(8)
 end
 
--- The window's text area on screen: 1-based row and column, size in cells
 ---@param win integer
 ---@param mode "kitty"|"sixel"
 local function text_area(win, mode)
@@ -134,7 +135,7 @@ local function text_area(win, mode)
   local top, left = border_offsets(win)
   local row = info.winrow + top + (info.winbar or 0)
   local rows = info.height
-  -- A Sixel image reaching the bottom row would scroll the screen
+  -- Sixel on the bottom row scrolls the screen
   if mode == "sixel" and row + rows - 1 >= vim.o.lines then
     rows = rows - 1
   end
@@ -159,26 +160,26 @@ function M.start(viewer, mode, cmd, path)
   local job
   local stopping = false
   local chunks = {}
-  local shown = false
+
+  -- Kitty can re-place its last image, Sixel has to be resent
+  local image_size, placed_at, last_sixel
+
+  local function at_window()
+    local row, col = text_area(win, mode)
+    return ("\27[?2026h\0277\27[%d;%dH"):format(row, col), row .. "," .. col
+  end
+  local DRAW_END = "\0278\27[?2026l"
 
   local function hide()
-    if not shown then
+    if not placed_at then
       return
     end
-    shown = false
+    placed_at = nil
     if mode == "kitty" then
-      vim.api.nvim_ui_send(("\27_Ga=d,d=I,i=%d,q=2\27\\"):format(KITTY_IMAGE_ID))
+      vim.api.nvim_ui_send(("\27_Ga=d,d=i,i=%d,q=2\27\\"):format(KITTY_IMAGE_ID))
     else
       vim.cmd("redraw!")
     end
-  end
-
-  -- The text area size dcat is rendering for
-  local size
-
-  local function current_size()
-    local _, _, columns, rows = text_area(win, mode)
-    return columns .. "x" .. rows
   end
 
   local function visible()
@@ -187,14 +188,37 @@ function M.start(viewer, mode, cmd, path)
       and vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
   end
 
-  -- Where the image is in dcat's output for one frame, found with plain
-  -- searches. Lua patterns are hundreds of times slower on frames this big.
+  -- Frames from before a resize can be too big
+  ---@param size integer[]
+  local function fits(size)
+    local _, _, columns, rows = text_area(win, mode)
+    return size[1] <= columns * cell_width and size[2] <= rows * cell_height
+  end
+
+  local function refresh()
+    if not visible() or not image_size or not fits(image_size) then
+      hide()
+      return
+    end
+    local prefix, at = at_window()
+    if at == placed_at then
+      return
+    end
+    if mode == "kitty" then
+      vim.api.nvim_ui_send(prefix .. ("\27_Ga=p,i=%d,p=1,q=2,C=1\27\\"):format(KITTY_IMAGE_ID) .. DRAW_END)
+    else
+      vim.api.nvim_ui_send(prefix .. last_sixel .. DRAW_END)
+    end
+    placed_at = at
+  end
+
+  -- Plain finds, since Lua patterns are far too slow on frames this big
   ---@param output string
   ---@param from integer
   ---@return integer? start, integer? finish, integer? header_end
   local function find_image(output, from)
     if mode == "sixel" then
-      -- Sixel data never contains ESC, so the first ST ends it
+      -- Sixel data has no ESC
       local start = output:find("\27P", from, true)
       local finish = start and select(2, output:find("\27\\", start, true))
       return start, finish, nil
@@ -206,20 +230,17 @@ function M.start(viewer, mode, cmd, path)
     end
     local finish
     if output:sub(start, header_end):find("m=1", 1, true) then
-      -- Inline pixels come in chunks, and the last has m=0. Base64 has no
-      -- ";", so "m=0;" only appears in a chunk header.
+      -- Base64 has no ";", so "m=0;" only appears in the last chunk header
       local last = output:find("m=0;", header_end, true)
       finish = last and select(2, output:find("\27\\", last, true))
     else
-      -- A single sequence, like a frame in shared memory
+      -- Shared memory frames are one sequence
       finish = select(2, output:find("\27\\", header_end, true))
     end
     return start, finish, header_end
   end
 
-  -- dcat counts a shared memory frame as read once the terminal removes it,
-  -- and gives up on shared memory if frames go unread. Frames that aren't
-  -- shown are removed here instead.
+  -- Unshown shared memory frames must be removed, or dcat stops using it
   ---@param output string
   ---@param from integer
   ---@param to integer
@@ -237,11 +258,31 @@ function M.start(viewer, mode, cmd, path)
   end
 
   ---@param output string
+  ---@param start integer
+  ---@param header_end? integer
+  ---@return integer[]?
+  local function frame_size(output, start, header_end)
+    local width, height
+    if header_end then
+      width, height = output:sub(start, header_end):match("s=(%d+),v=(%d+)")
+    else
+      width, height = output:match('^\27Pq"1;1;(%d+);(%d+)', start)
+    end
+    return width and { tonumber(width), tonumber(height) }
+  end
+
+  ---@param output string
   ---@param from integer
   ---@param to integer
   local function show(output, from, to)
     local start, finish, header_end = find_image(output, from)
     if not start or not finish or finish > to then
+      return
+    end
+    local size = frame_size(output, start, header_end)
+    if not size or not visible() or not fits(size) then
+      discard(output, from, to)
+      hide()
       return
     end
     local image
@@ -250,20 +291,16 @@ function M.start(viewer, mode, cmd, path)
       image = header .. output:sub(header_end + 1, finish)
     else
       image = output:sub(start, finish)
+      last_sixel = image
     end
-    local row, col = text_area(win, mode)
-    -- Save the cursor, draw at the window, and put the cursor back where the
-    -- TUI left it, all in one synchronized update
-    vim.api.nvim_ui_send(("\27[?2026h\0277\27[%d;%dH"):format(row, col) .. image .. "\0278\27[?2026l")
-    shown = true
+    local prefix, at = at_window()
+    vim.api.nvim_ui_send(prefix .. image .. DRAW_END)
+    image_size, placed_at = size, at
   end
 
-  -- Kitty query ids dcat is waiting on answers for, while it waits
   local query_ids
 
-  -- dcat asks the terminal whether it can read shared memory before its first
-  -- frame. Neovim's pty would never answer, so the query goes to the host
-  -- terminal, and the TermResponse handler below relays the replies.
+  -- Relay dcat's shared memory query, which Neovim's pty can't answer
   ---@param output string
   ---@return string? rest Output after the queries, once they're all there
   local function forward_queries(output)
@@ -292,7 +329,6 @@ function M.start(viewer, mode, cmd, path)
         return
       end
     end
-    -- The device attributes reply comes last
     if sequence:match("^\27%[%?[%d;]*c$") then
       vim.api.nvim_chan_send(job, sequence)
       query_ids = nil
@@ -302,8 +338,7 @@ function M.start(viewer, mode, cmd, path)
   local probing = false
 
   local function on_output(id, data)
-    -- A stopped dcat can still deliver the rest of a frame, which would be
-    -- spliced into the new one's output
+    -- Ignore what a stopped dcat still sends
     if id ~= job then
       return
     end
@@ -321,7 +356,6 @@ function M.start(viewer, mode, cmd, path)
       chunks = { rest }
       text = rest
     end
-    -- The end marker may straddle two reads
     local previous_tail = #chunks > 1 and chunks[#chunks - 1]:sub(-#FRAME_END) or ""
     if
       not (previous_tail .. text:sub(1, #FRAME_END)):find(FRAME_END, 1, true) and not text:find(FRAME_END, 1, true)
@@ -346,19 +380,12 @@ function M.start(viewer, mode, cmd, path)
     local rest = output:sub(from)
     chunks = rest ~= "" and { rest } or {}
 
-    -- Only the newest frame is shown, so a slow terminal skips frames instead
-    -- of falling further behind
+    -- Show only the newest frame, so a slow terminal doesn't fall behind
     for i = 1, #frames - 1 do
       discard(output, frames[i][1], frames[i][2])
     end
     local newest = frames[#frames]
-    -- A frame rendered for an old size would spill out of the window
-    if visible() and current_size() == size then
-      show(output, newest[1], newest[2])
-    else
-      discard(output, newest[1], newest[2])
-      hide()
-    end
+    show(output, newest[1], newest[2])
   end
 
   local start
@@ -372,33 +399,41 @@ function M.start(viewer, mode, cmd, path)
       stop(job)
     end
     hide()
+    if mode == "kitty" and image_size then
+      vim.api.nvim_ui_send(("\27_Ga=d,d=I,i=%d,q=2\27\\"):format(KITTY_IMAGE_ID))
+    end
   end
 
-  start = function()
+  -- dcat reserves a row below Sixel images
+  local function pty_size()
     local _, _, columns, rows = text_area(win, mode)
-    size = columns .. "x" .. rows
+    return columns, rows + (mode == "sixel" and 1 or 0)
+  end
+  local pty
+
+  start = function()
+    local columns, rows = pty_size()
+    pty = columns .. "x" .. rows
     probing = mode == "kitty"
     query_ids = nil
     local full_cmd = vim.list_extend(vim.deepcopy(cmd), {
       mode == "kitty" and "--kitty" or "--sixel",
-      "-W",
-      tostring(columns * cell_width),
-      "-H",
-      tostring(rows * cell_height),
+      "--cell-size",
+      cell_width .. "x" .. cell_height,
       "--",
       path,
     })
     job = vim.fn.jobstart(full_cmd, {
       pty = true,
-      width = PTY_COLUMNS,
-      height = PTY_ROWS,
+      width = columns,
+      height = rows,
       on_stdout = on_output,
       on_exit = function(id, code)
         vim.schedule(function()
           if id ~= job or stopping then
             return
           end
-          -- dcat prints errors after restoring the screen, past its last frame
+          -- dcat prints errors after its last frame
           local message = table.concat(chunks):gsub("\27[_P].-\27\\", ""):gsub("\27%[[%d;?]*[%a@]", ""):gsub("\27.", "")
           message = vim.trim(message)
           viewer.close()
@@ -414,7 +449,7 @@ function M.start(viewer, mode, cmd, path)
     end
   end
 
-  -- nowait, so longer mappings starting with these keys don't delay them
+  -- nowait, so longer mappings don't delay these
   for _, key in ipairs(KEYS) do
     vim.keymap.set("n", key, function()
       vim.api.nvim_chan_send(job, key)
@@ -422,36 +457,36 @@ function M.start(viewer, mode, cmd, path)
   end
   vim.keymap.set("n", "q", viewer.close, { buffer = buf, nowait = true })
 
-  -- dcat's render size is fixed by -W and -H, so a new size needs a new dcat.
-  -- A window that only moved needs nothing, since every frame is placed anew.
-  local restart_timer
-  vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
+  -- Resizes go to dcat's pty. A new cell size, from a font change, needs a new dcat.
+  vim.api.nvim_create_autocmd({ "WinResized", "VimResized", "TabEnter" }, {
     group = group,
     callback = function()
-      if not visible() then
+      if stopping then
         return
       end
-      if current_size() == size then
-        return
-      end
-      if restart_timer then
-        restart_timer:stop()
-      end
-      restart_timer = vim.defer_fn(function()
-        if stopping or not visible() or current_size() == size then
-          return
-        end
+      local new_width, new_height = cell_pixels()
+      if new_width and (new_width ~= cell_width or new_height ~= cell_height) then
+        cell_width, cell_height = new_width, new_height
         local old = job
         job = nil
         stop(old)
         chunks = {}
         hide()
+        image_size = nil
         start()
-      end, 150)
+        return
+      end
+      if visible() then
+        local columns, rows = pty_size()
+        if columns .. "x" .. rows ~= pty then
+          pty = columns .. "x" .. rows
+          vim.fn.jobresize(job, columns, rows)
+        end
+      end
+      refresh()
     end,
   })
-  -- Quitting Neovim would otherwise kill dcat before it removes the shared
-  -- memory objects for frames still on their way, leaving them in memory
+  -- Let dcat remove its shared memory before Neovim exits
   vim.api.nvim_create_autocmd("VimLeavePre", {
     group = group,
     callback = function()

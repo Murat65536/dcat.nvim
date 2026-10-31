@@ -1,24 +1,20 @@
--- The character viewer: dcat in a :terminal, drawing with text characters
+-- Character viewer: dcat in a :terminal
 
 local M = {}
 
 local group = vim.api.nvim_create_augroup("dcat_terminal", { clear = true })
 
--- <C-c> quits dcat, <C-w> is mapped separately, and <C-\\> leaves terminal mode
 local NOT_FORWARDED = { ["<C-C>"] = true, ["<C-W>"] = true, ["<C-\\>"] = true, ["<C-Bslash>"] = true }
 
--- The viewer sends every key to dcat. These go to Neovim instead: <C-w>, : and
--- every single-key Ctrl or Alt normal-mode mapping, none of which dcat uses.
+-- Keys that go to Neovim instead of dcat
 ---@param buf integer
 local function forward_keys(buf)
   local function map(key, rhs)
-    -- Terminal-mode mappings the user made win
     if vim.fn.maparg(key, "t") == "" then
       vim.keymap.set("t", key, rhs, { buffer = buf })
     end
   end
 
-  -- Built in, so they run in normal mode without remapping
   map("<C-W>", "<C-\\><C-n><C-W>")
   map(":", "<C-\\><C-n>:")
 
@@ -26,8 +22,7 @@ local function forward_keys(buf)
     local key = mapping.lhs or ""
     if key:match("^<[CMA]%-[^>]+>$") and not NOT_FORWARDED[key] then
       map(key, function()
-        -- A remapped key fed while still in terminal mode would hit this
-        -- mapping again, so it's fed once Neovim is in normal mode
+        -- Fed in terminal mode, the key would trigger this mapping again
         vim.cmd.stopinsert()
         vim.schedule(function()
           vim.api.nvim_feedkeys(vim.keycode(key), "m", false)
@@ -37,7 +32,7 @@ local function forward_keys(buf)
   end
 end
 
--- The terminal's text, with lines it wrapped at the window edge joined back up
+-- Joins lines the terminal wrapped
 ---@param buf integer
 ---@param width integer
 local function terminal_text(buf, width)
@@ -68,7 +63,7 @@ function M.start(viewer, cmd)
           message = terminal_text(buf, vim.api.nvim_win_get_width(win))
           message = message ~= "" and message or ("dcat exited with code " .. code)
         end
-        -- Close first, so a fullscreen viewer's message shows with the command line back
+        -- Close first, so cmdheight is back for the message
         viewer.close()
         if message then
           vim.notify(message, vim.log.levels.ERROR)

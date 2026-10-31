@@ -1,5 +1,3 @@
--- The window a viewer shows in, for every layout
-
 local config = require("dcat.config")
 
 local M = {}
@@ -25,7 +23,6 @@ local function float_config(layout, title)
       height = vim.o.lines - vim.o.cmdheight,
       border = "none",
       style = "minimal",
-      -- Above other floats, which would otherwise show through
       zindex = 200,
     }
   end
@@ -69,8 +66,7 @@ local function open_window(buf, layout, title)
   return vim.api.nvim_get_current_win()
 end
 
--- Floats can't cover the command line, so it's hidden while a fullscreen
--- viewer is open. Counted, since a new viewer opens before the old one closes.
+-- Floats can't cover the command line
 local fullscreen_viewers = 0
 local saved_cmdheight
 
@@ -113,8 +109,7 @@ function M.open(layout, title)
     error(win, 0)
   end
 
-  -- The viewer takes the window's text area, so free up the gutter first.
-  -- Set locally, so the window gets its options back when it shows another buffer.
+  -- Local, so the window's options come back with another buffer
   local wo = vim.wo[win][0]
   wo.number = false
   wo.relativenumber = false
@@ -154,7 +149,6 @@ function M.open(layout, title)
   end
   viewer = { buf = buf, win = win, close = close }
 
-  -- The buffer goes when its window shows something else or is closed
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = group,
     buffer = buf,
@@ -173,7 +167,6 @@ function M.open(layout, title)
         end
       end,
     })
-    -- A float left behind would keep covering the editor
     vim.api.nvim_create_autocmd("WinLeave", {
       group = group,
       buffer = buf,

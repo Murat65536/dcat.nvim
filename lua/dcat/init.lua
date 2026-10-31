@@ -2,7 +2,6 @@ local config = require("dcat.config")
 
 local M = {}
 
--- Flags that pick an output mode. dcat rejects more than one.
 ---@type table<string, dcat.Output>
 local OUTPUT_ARGS = {
   ["-S"] = "sixel",
@@ -24,7 +23,7 @@ local CHARACTER_FLAGS = {
   block = "--block-characters",
 }
 
--- Flags whose value is the next argument, so it isn't taken for the model path
+-- Flags that take a value
 local VALUE_ARGS = {
   ["-t"] = true,
   ["--texture"] = true,
@@ -50,7 +49,6 @@ function M.setup(opts)
   M.register_extensions()
 end
 
--- The output mode asked for by the arguments or the config, if any
 ---@param args string[]
 ---@return dcat.Output?
 local function requested_output(args)
@@ -61,7 +59,6 @@ local function requested_output(args)
   return requested
 end
 
--- The output mode to use, and why pixels aren't used if they aren't
 ---@param args string[] dcat arguments, which may pick a mode themselves
 ---@return dcat.Output output, string? reason
 function M.output(args)
@@ -114,7 +111,6 @@ function M.open(path, opts)
   if reason and (requested == "kitty" or requested == "sixel") then
     vim.notify(("dcat: showing characters, since %s"):format(reason), vim.log.levels.WARN)
   end
-  -- The viewer adds the output flag for the mode it runs
   for _, arg in ipairs(args) do
     if not OUTPUT_ARGS[arg] then
       cmd[#cmd + 1] = arg
@@ -128,20 +124,18 @@ function M.open(path, opts)
     ---@cast output "kitty"|"sixel"
     require("dcat.pixels").start(viewer, output, cmd, path)
   else
-    -- Neovim's terminal can't show Kitty or Sixel images, but dcat would pick
-    -- them from the environment variables it inherits from the outer terminal
+    -- dcat would pick graphics from the inherited environment
     vim.list_extend(cmd, { CHARACTER_FLAGS[output], "--", path })
     require("dcat.terminal").start(viewer, cmd)
   end
 end
 
--- Load the file into its buffer the way :edit would without the BufReadCmd
+-- Load the file as :edit would
 ---@param buf integer
 local function load_as_text(buf)
   local path = vim.api.nvim_buf_get_name(buf)
   local escaped = vim.fn.fnameescape(path)
   local bo = vim.bo[buf]
-  -- Keeps the buffer as text when it's reloaded with :e
   vim.b[buf].dcat_text = true
   pcall(vim.keymap.del, "n", "<CR>", { buffer = buf })
   pcall(vim.keymap.del, "n", "e", { buffer = buf })
@@ -155,11 +149,10 @@ local function load_as_text(buf)
       return
     end
     vim.cmd("silent doautocmd BufReadPre " .. escaped)
-    -- Without undo history, u can't bring back the placeholder
+    -- So u can't bring back the placeholder
     local undolevels = bo.undolevels
     bo.undolevels = -1
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
-    -- ++edit detects the file's format and encoding like :edit does
     vim.cmd("silent keepalt read ++edit " .. escaped)
     vim.cmd("silent 1delete _")
     bo.undolevels = undolevels
@@ -168,18 +161,16 @@ local function load_as_text(buf)
   end)
 end
 
--- Leave a model file's buffer empty instead of loading its contents
 ---@param buf integer
 local function load_model_buffer(buf)
   local path = vim.api.nvim_buf_get_name(buf)
-  -- A new file has nothing to view yet
   if vim.b[buf].dcat_text or vim.fn.filereadable(path) == 0 then
     load_as_text(buf)
     return
   end
 
   local bo = vim.bo[buf]
-  -- nofile keeps :w from writing the placeholder over the model
+  -- nofile keeps :w from overwriting the model
   bo.buftype = "nofile"
   bo.swapfile = false
   bo.modifiable = true
@@ -199,7 +190,7 @@ local function load_model_buffer(buf)
       M.open(path)
     end
   end
-  -- Wait for the UI so the viewer gets the real window size
+  -- Wait for the real window size
   if vim.v.vim_did_enter == 1 then
     vim.schedule(open_if_shown)
   else
@@ -207,7 +198,7 @@ local function load_model_buffer(buf)
   end
 end
 
--- "glb" -> "*.[gG][lL][bB]", since autocmd patterns are case sensitive
+-- Autocmd patterns are case sensitive
 ---@param extension string
 local function extension_pattern(extension)
   return "*." .. extension:gsub("%a", function(letter)
@@ -230,7 +221,6 @@ function M.register_extensions()
   })
 end
 
--- Handle :Dcat [file] [dcat arguments]
 ---@param fargs string[]
 function M.command(fargs)
   local path

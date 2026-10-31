@@ -28,8 +28,8 @@ shows which, and why. See |dcat-output| to choose.
 With pixels, dcat runs outside |:terminal| and its frames are written to the
 terminal with |nvim_ui_send()|, over the viewer's window. The window stays in
 normal mode: w a s d e r m p 1 2 go to dcat and every other key works as
-usual. Floating windows over the viewer get drawn over, and resizing the
-window restarts dcat. Inside tmux or screen, pixels aren't used.
+usual. Floating windows over the viewer get drawn over. Inside tmux or
+screen, or with a dcat too old to have --cell-size, pixels aren't used.
 
                                                          *dcat-characters*
 With characters, dcat runs in a |:terminal| and gets every key. Run

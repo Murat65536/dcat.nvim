@@ -25,9 +25,7 @@ M.defaults = {
     height = 0.9,
     border = "rounded",
   },
-  -- Every format dcat's Assimp build reads, except extensions that ordinary
-  -- files share (ac, x, xml, raw, mot, prj, uc, mdl, scn, pk3) and formats
-  -- holding only animation or camera data (bvh, csm, md5anim, md5camera, vta)
+  -- Assimp's formats, minus ones ordinary files share and animation-only ones
   -- stylua: ignore
   extensions = {
     "3d", "3ds", "3mf", "ac3d", "acc", "amf", "ase", "ask", "assbin", "b3d",
@@ -45,7 +43,7 @@ M.options = vim.deepcopy(M.defaults)
 ---@param opts? table
 function M.set(opts)
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})
-  -- Lists replace the defaults instead of merging into them by index
+  -- Replace lists instead of merging them by index
   if opts and opts.extensions then
     M.options.extensions = opts.extensions
   end
@@ -54,7 +52,6 @@ function M.set(opts)
   end
 end
 
--- The configured command as a list
 ---@return string[]
 function M.cmd()
   local cmd = M.options.cmd

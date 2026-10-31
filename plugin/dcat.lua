@@ -16,5 +16,4 @@ end, {
   desc = "View a 3D model with dcat",
 })
 
--- Works without setup(); calling setup() re-registers with the new extensions
 require("dcat").register_extensions()
