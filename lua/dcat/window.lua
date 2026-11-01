@@ -154,7 +154,9 @@ function M.open(layout, title)
   end
   viewer = { buf = buf, win = win, close = close }
 
-  vim.api.nvim_create_autocmd("BufWipeout", {
+  -- Neovim only hides a terminal whose job is running, so a viewer no window
+  -- shows anymore would keep dcat running
+  vim.api.nvim_create_autocmd({ "BufHidden", "BufWipeout" }, {
     group = group,
     buffer = buf,
     once = true,

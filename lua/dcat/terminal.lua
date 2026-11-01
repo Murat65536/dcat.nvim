@@ -63,7 +63,10 @@ function M.start(viewer, cmd)
     on_exit = function(_, code)
       vim.schedule(function()
         local message
-        if code ~= 0 and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
+        if code > 128 then
+          -- Killed, so the screen holds a frame, not an error
+          message = ("dcat was stopped by signal %d"):format(code - 128)
+        elseif code ~= 0 and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
           message = terminal_text(buf, vim.api.nvim_win_get_width(win))
           message = message ~= "" and message or ("dcat exited with code " .. code)
         end
